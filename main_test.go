@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMemoryStoreTransition(t *testing.T) {
@@ -592,5 +593,58 @@ func TestWorkerFails (t *testing.T) {
 
 	if j.Status != StatusFailed {
 		t.Fatalf("status = %s, want = %s", j.Status, StatusFailed)
+	}
+}
+
+func TestHTTPCheckerStatuses(t *testing.T) {
+	cases := []struct{
+		name string
+		status int
+		wantErr bool
+	}{
+		{
+			name: "200 - OK",
+			status: 200,
+			wantErr: false,
+		},
+		{
+			name: "204 - No content",
+			status: 204,
+			wantErr: false,
+		},
+		{
+			name: "404 - Not found",
+			status: 404,
+			wantErr: true,
+		},
+		{
+			name: "500 - Internal Server Error",
+			status: 500,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(
+				func(w http.ResponseWriter, r *http.Request) {
+					w.WriteHeader(tc.status)
+				},
+			))
+
+			defer server.Close()
+
+			client := server.Client()
+			
+			client.Timeout = time.Second
+
+			checker := &HTTPChecker{client: client}
+
+			err := checker.Check(server.URL)
+
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("error = %v, wantErr = %t", err, tc.wantErr)
+			}
+		})
 	}
 }
