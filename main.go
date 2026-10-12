@@ -43,10 +43,29 @@ type CreateJobRequest struct {
 	URL string `json:"url"`
 }
 
+type Worker struct {
+	store WorkerStore
+	checker URLChecker
+}	
+
+type HTTPChecker struct {
+	client *http.Client
+}
+
+
 //Interfaces
 type JobReader interface {
 	Get(id uint64) (Job, error)
 	Create(address string) (Job, error)
+}
+
+type WorkerStore interface {
+	Get(id uint64) (Job, error)
+	Transition(id uint64, next JobStatus) error
+}
+
+type URLChecker interface {
+	Check (url string) error
 }
 
 
@@ -267,6 +286,51 @@ func (m *MemoryStore) Create(address string) (Job, error) {
 	m.jobs[m.lastID] = job
 
 	return job, nil
+}
+
+//Worker.RunOne
+func (w *Worker) RunOne (id uint64) error {
+	j, err := w.store.Get(id)
+
+	if err != nil {
+		return err
+	}
+
+	err = w.store.Transition(id, StatusRunning)
+
+	if err != nil {
+		return err
+	}
+
+	checkErr := w.checker.Check(j.URL)
+
+	if checkErr != nil {
+		err = w.store.Transition(id, StatusFailed)
+	} else {
+		err = w.store.Transition(id, StatusSucceeded)
+	}
+
+	if err != nil {
+		return err
+	}
+
+	return checkErr
+}
+
+func (c *HTTPChecker) Check (url string) error {
+	resp, err := c.client.Get(url)
+
+	if err != nil {
+		return fmt.Errorf("checking %s: %w", url, err)
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return fmt.Errorf("checking %s: unexpected http status: %d", url, resp.StatusCode)
+	}
+
+	return nil
 }
 
 //Normal functions:

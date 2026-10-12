@@ -518,3 +518,79 @@ func TestAPICreateJobStoreFailure(t *testing.T) {
 	}
 }
 
+type fakeChecker struct {
+	err error
+}
+
+func (c *fakeChecker) Check(url string) error {
+	return c.err
+}
+
+func TestWorkerSucceeds (t *testing.T) {
+	memStore := NewMemoryStore()
+	err := memStore.Add(Job{
+		ID: 1,
+		URL:"https://example.com",
+		Status: StatusQueued,
+	})
+
+	if err != nil {
+		t.Fatalf("error adding job: %v", err)
+	}
+
+	fc := &fakeChecker{err: nil}
+
+	ws := Worker{store: memStore, checker: fc}
+
+	err = ws.RunOne(1)
+
+	if err != nil {
+		t.Fatalf("error running Worker.RunOne: %v", err)
+	}
+
+	j, err := ws.store.Get(1)
+
+	if err != nil {
+		t.Fatalf("error getting job: %v", err)
+	}
+
+	if j.Status != StatusSucceeded {
+		t.Fatalf("status = %s, want = %s", j.Status, StatusSucceeded)
+	}
+}
+
+func TestWorkerFails (t *testing.T) {
+	memStore := NewMemoryStore()
+
+	err := memStore.Add(Job{
+		ID: 1,
+		URL:"https://example.com",
+		Status: StatusQueued,
+	})
+
+	if err != nil {
+		t.Fatalf("error adding job: %v", err)
+	}
+
+	checkErr := errors.New("site unavailable")
+
+	fc := &fakeChecker{err: checkErr}
+
+	ws := Worker{store: memStore, checker: fc}
+
+	err = ws.RunOne(1)
+
+	if !errors.Is(err, checkErr) {
+		t.Fatalf("error = %v, want = %v", err, checkErr)
+	}
+
+	j, err := ws.store.Get(1)
+
+	if err != nil {
+		t.Fatalf("error getting job: %v", err)
+	}
+
+	if j.Status != StatusFailed {
+		t.Fatalf("status = %s, want = %s", j.Status, StatusFailed)
+	}
+}
