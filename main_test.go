@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -646,5 +647,202 @@ func TestHTTPCheckerStatuses(t *testing.T) {
 				t.Fatalf("error = %v, wantErr = %t", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+
+func TestWorkerProccesesQueue(t *testing.T) {
+	memStore := NewMemoryStore()
+
+	var wg sync.WaitGroup
+
+	j1, err := memStore.Create("https://example.com")
+
+	if err != nil {
+		t.Fatalf("error creating job: %v\n", err)
+	}
+
+	j2, err := memStore.Create("https://go.dev")
+
+	if err != nil {
+		t.Fatalf("error creating job: %v\n", err)
+	}
+
+	w := Worker{store: memStore, checker: &fakeChecker{}}
+
+	queue := make(chan uint64, 2)
+
+	wg.Go(func() {
+		w.Run(queue)
+	} )
+
+	queue <- j1.ID
+	queue <- j2.ID
+
+	close(queue)
+
+	wg.Wait()
+
+	j1, err = w.store.Get(1)
+	
+	if err != nil {
+		t.Fatalf("error getting job: %v\n", err)
+	}
+
+	j2, err = w.store.Get(2)
+
+	if err != nil {
+		t.Fatalf("error getting job: %v\n", err)
+	}
+
+	if j1.Status != StatusSucceeded || j2.Status != StatusSucceeded {
+		t.Fatalf("status1 = %s, status2 = %s, wanted status1 = %s, status2 = %s\n", j1.Status, j2.Status, StatusSucceeded, StatusSucceeded)
+	}
+}
+
+func TestWorkerPoolProcessesJobs(t *testing.T) {
+	ids := []uint64{1, 2, 3, 4, 5, 6}
+
+	memStore := NewMemoryStore()
+	checker := &fakeChecker{err: nil}
+
+	err := memStore.Add(Job{
+		ID: 1,
+		URL: "https://example.com",
+		Status: StatusQueued,
+	})
+
+	if err != nil {
+		t.Fatalf("error adding job: %v", err)
+	}
+
+	err = memStore.Add(Job{
+		ID: 2,
+		URL: "https://example.com",
+		Status: StatusQueued,
+	})
+
+	if err != nil {
+		t.Fatalf("error adding job: %v", err)
+	}
+
+	err = memStore.Add(Job{
+		ID: 3,
+		URL: "https://example.com",
+		Status: StatusQueued,
+	})
+
+	if err != nil {
+		t.Fatalf("error adding job: %v", err)
+	}
+
+	err = memStore.Add(Job{
+		ID: 4,
+		URL: "https://example.com",
+		Status: StatusQueued,
+	})
+
+	if err != nil {
+		t.Fatalf("error adding job: %v", err)
+	}
+
+	err = memStore.Add(Job{
+		ID: 5,
+		URL: "https://example.com",
+		Status: StatusQueued,
+	})
+
+	if err != nil {
+		t.Fatalf("error adding job: %v", err)
+	}
+
+	err = memStore.Add(Job{
+		ID: 6,
+		URL: "https://example.com",
+		Status: StatusQueued,
+	})
+
+	if err != nil {
+		t.Fatalf("error adding job: %v", err)
+	}
+
+
+	w := Worker{store: memStore, checker: checker}
+
+	var wg sync.WaitGroup
+
+	q := make(chan uint64, 2)
+
+	for range 3 {
+		wg.Go(func() {
+			w.Run(q)
+		})
+	}
+
+	for _, id := range ids {
+		q <- id
+	}
+
+	close(q)
+	wg.Wait()
+
+	j, err := w.store.Get(1)
+
+	if err != nil {
+		t.Fatalf("error getting job: %v\n", err)
+	}
+
+	if j.Status != StatusSucceeded {
+		t.Fatalf("status = %s, want = %s\n", j.Status, StatusSucceeded)
+	}
+
+	j, err = w.store.Get(2)
+
+	if err != nil {
+		t.Fatalf("error getting job: %v\n", err)
+	}
+
+	if j.Status != StatusSucceeded {
+		t.Fatalf("status = %s, want = %s\n", j.Status, StatusSucceeded)
+	}
+
+	j, err = w.store.Get(3)
+
+	if err != nil {
+		t.Fatalf("error getting job: %v\n", err)
+	}
+
+	if j.Status != StatusSucceeded {
+		t.Fatalf("status = %s, want = %s\n", j.Status, StatusSucceeded)
+	}
+
+	j, err = w.store.Get(4)
+
+	if err != nil {
+		t.Fatalf("error getting job: %v\n", err)
+	}
+
+	if j.Status != StatusSucceeded {
+		t.Fatalf("status = %s, want = %s\n", j.Status, StatusSucceeded)
+	}
+
+	j, err = w.store.Get(5)
+
+	if err != nil {
+		t.Fatalf("error getting job: %v\n", err)
+	}
+
+	if j.Status != StatusSucceeded {
+		t.Fatalf("status = %s, want = %s\n", j.Status, StatusSucceeded)
+	}
+
+	j, err = w.store.Get(6)
+
+	if err != nil {
+		t.Fatalf("error getting job: %v\n", err)
+	}
+
+	if j.Status != StatusSucceeded {
+		t.Fatalf("status = %s, want = %s\n", j.Status, StatusSucceeded)
 	}
 }

@@ -317,6 +317,7 @@ func (w *Worker) RunOne (id uint64) error {
 	return checkErr
 }
 
+//HTTPChecker.Check
 func (c *HTTPChecker) Check (url string) error {
 	resp, err := c.client.Get(url)
 
@@ -331,6 +332,16 @@ func (c *HTTPChecker) Check (url string) error {
 	}
 
 	return nil
+}
+
+//Worker.Run
+func (w *Worker) Run(queue <- chan uint64) {
+	for id := range queue {
+		err := w.RunOne(id)
+		if err != nil {
+			fmt.Printf("error running job %v: %v", id, err)
+		}
+	}
 }
 
 //Normal functions:
