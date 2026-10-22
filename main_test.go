@@ -373,7 +373,9 @@ func TestMemoryStoreCreate(t *testing.T) {
 
 func TestAPICreateJob(t *testing.T) {
 	memStore := NewMemoryStore()
-	api := &API{store: memStore}
+	q := make(chan uint64, 1)
+
+	api := &API{store: memStore, q: q}
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -403,6 +405,15 @@ func TestAPICreateJob(t *testing.T) {
 
 	if (decodeErr != nil) {
 		t.Fatalf("decoding response failed: %v", decodeErr)
+	}
+
+	select {
+	case id := <- q:
+		if id != got.ID {
+			t.Fatalf("queued ID = %v, want %v", id, got.ID)
+		}
+	default:
+		t.Fatal("created job was not queued")
 	}
 
 	want := Job{ID: 1, URL: "https://example.com", Status: StatusQueued}

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 )
 
 //Types and consts
@@ -37,6 +38,7 @@ type MemoryStore struct { //Is a JobReader, has Create & Get behaviors on the un
 
 type API struct { //Has getJob, createJob & ServeHTTP behaviors
 	store JobReader //Stores a JobReader with Create & Get behaviors, i.e. MemoryStore with a map[uint64]Job inside it
+	q chan <- uint64
 }
 
 type CreateJobRequest struct {
@@ -238,6 +240,8 @@ func (a *API) createJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	a.q <- j.ID
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	_, err = w.Write(data)
@@ -356,6 +360,13 @@ func NewMemoryStore() *MemoryStore {
 //Main
 func main() {
 	memStore := NewMemoryStore()
+	queue := make(chan uint64, 16)
+
+	api := &API{store: memStore, q: queue}
+	worker := &Worker{store: memStore, checker: &HTTPChecker{
+		client: &http.Client{Timeout: 5 * time.Second},
+	}}
+
 
 	var err error
 
@@ -366,7 +377,13 @@ func main() {
 		return
 	}
 
-	err = http.ListenAndServe("127.0.0.1:8080", &API{store: memStore})
+	queue <- 1
+
+	for range 3 {
+		go worker.Run(queue)
+	}
+
+	err = http.ListenAndServe("127.0.0.1:8080", api)
 
 	if (err != nil) {
 		fmt.Println(err)
