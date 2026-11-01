@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -535,7 +536,7 @@ type fakeChecker struct {
 	err error
 }
 
-func (c *fakeChecker) Check(url string) error {
+func (c *fakeChecker) Check(ctx context.Context, url string) error {
 	return c.err
 }
 
@@ -555,7 +556,7 @@ func TestWorkerSucceeds (t *testing.T) {
 
 	ws := Worker{store: memStore, checker: fc}
 
-	err = ws.RunOne(1)
+	err = ws.RunOne(context.Background(), 1)
 
 	if err != nil {
 		t.Fatalf("error running Worker.RunOne: %v", err)
@@ -591,7 +592,7 @@ func TestWorkerFails (t *testing.T) {
 
 	ws := Worker{store: memStore, checker: fc}
 
-	err = ws.RunOne(1)
+	err = ws.RunOne(context.Background(), 1)
 
 	if !errors.Is(err, checkErr) {
 		t.Fatalf("error = %v, want = %v", err, checkErr)
@@ -652,7 +653,7 @@ func TestHTTPCheckerStatuses(t *testing.T) {
 
 			checker := &HTTPChecker{client: client}
 
-			err := checker.Check(server.URL)
+			err := checker.Check(context.Background(), server.URL)
 
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("error = %v, wantErr = %t", err, tc.wantErr)
@@ -684,7 +685,7 @@ func TestWorkerProccesesQueue(t *testing.T) {
 	queue := make(chan uint64, 2)
 
 	wg.Go(func() {
-		w.Run(queue)
+		w.Run(context.Background(), queue)
 	} )
 
 	queue <- j1.ID
@@ -786,7 +787,7 @@ func TestWorkerPoolProcessesJobs(t *testing.T) {
 
 	for range 3 {
 		wg.Go(func() {
-			w.Run(q)
+			w.Run(context.Background(), q)
 		})
 	}
 
@@ -856,4 +857,28 @@ func TestWorkerPoolProcessesJobs(t *testing.T) {
 	if j.Status != StatusSucceeded {
 		t.Fatalf("status = %s, want = %s\n", j.Status, StatusSucceeded)
 	}
+}
+
+func TestWorkerStopsOnCancellation(t *testing.T) {
+	worker := &Worker{store: NewMemoryStore(), checker: &fakeChecker{}}
+
+	ch := make(chan uint64, 16)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var wg sync.WaitGroup
+
+	for range 3 {
+		wg.Go(func () {
+			worker.Run(ctx, ch)
+		})
+	}
+
+	cancel()
+	wg.Wait()
+}
+
+func TestWorkerCancelsInFlightRequest(t *testing.T) {
+	
 }

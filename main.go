@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -67,7 +68,7 @@ type WorkerStore interface {
 }
 
 type URLChecker interface {
-	Check (url string) error
+	Check (ctx context.Context, url string) error
 }
 
 
@@ -293,7 +294,11 @@ func (m *MemoryStore) Create(address string) (Job, error) {
 }
 
 //Worker.RunOne
-func (w *Worker) RunOne (id uint64) error {
+func (w *Worker) RunOne (ctx context.Context, id uint64) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	j, err := w.store.Get(id)
 
 	if err != nil {
@@ -306,7 +311,7 @@ func (w *Worker) RunOne (id uint64) error {
 		return err
 	}
 
-	checkErr := w.checker.Check(j.URL)
+	checkErr := w.checker.Check(ctx, j.URL)
 
 	if checkErr != nil {
 		err = w.store.Transition(id, StatusFailed)
@@ -322,8 +327,16 @@ func (w *Worker) RunOne (id uint64) error {
 }
 
 //HTTPChecker.Check
-func (c *HTTPChecker) Check (url string) error {
-	resp, err := c.client.Get(url)
+func (c *HTTPChecker) Check (ctx context.Context, url string) error {
+	// resp, err := c.client.Get(url)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	
+	if err != nil {
+		return fmt.Errorf("building request for %s error: %w", url, err)
+	}
+
+	resp, err := c.client.Do(req)
 
 	if err != nil {
 		return fmt.Errorf("checking %s: %w", url, err)
@@ -339,11 +352,19 @@ func (c *HTTPChecker) Check (url string) error {
 }
 
 //Worker.Run
-func (w *Worker) Run(queue <- chan uint64) {
-	for id := range queue {
-		err := w.RunOne(id)
-		if err != nil {
-			fmt.Printf("error running job %v: %v", id, err)
+func (w *Worker) Run(ctx context.Context, queue <- chan uint64) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case id, ok := <-queue:
+			if !ok {
+				return
+			}
+
+			if err := w.RunOne(ctx, id); err != nil {
+				fmt.Printf("error running job %v: %v", id, err)
+			}
 		}
 	}
 }
@@ -380,7 +401,7 @@ func main() {
 	queue <- 1
 
 	for range 3 {
-		go worker.Run(queue)
+		go worker.Run(context.Background(), queue)
 	}
 
 	err = http.ListenAndServe("127.0.0.1:8080", api)
